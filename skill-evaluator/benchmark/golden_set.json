@@ -1,0 +1,113 @@
+{
+  "schema_version": "1.0",
+  "frozen_at": "2026-10-04",
+  "purpose": "用 8 份『缺陷已知』的样本，量化评审器的 否决项误报/漏报、完整性判定、条件分落点、结论一致性。",
+  "labeling_protocol": [
+    "每个 fixture 的缺陷是**造样本时就注入进去的**，标注即设计意图——不是看了评审结果再回头编的。",
+    "fixtures/ 下每个目录名就写明了注入的缺陷（FX03_写死绝对路径 等）。",
+    "条件分与维度分用**区间**标注而不是点值：权重是设计选择，点值精确到小数没有意义，但『应该显著低于满分』是有意义的。",
+    "区间宽度刻意留得比实际需要更宽——窄区间的通过只说明调参调得好，不说明判得准。"
+  ],
+  "metric_directions": {
+    "否决项误报": "评审器判了『不合格』，但样本其实没有该缺陷 → 冤枉一个认真交作业的同学，这是最坏的结果",
+    "否决项漏报": "样本明明写死了绝对路径，评审器没拦 → 让一个别人根本跑不起来的提交过关",
+    "说明": "两类都严重。但因为『不合格』是不可逆的负面判定，误报的伤害更大，所以单独统计。"
+  },
+  "cases": [
+    {
+      "id": "FX01",
+      "fixture": "FX01_优质提交",
+      "author": "ZhangSan",
+      "title": "优质提交（对照基线）",
+      "expect_completeness_hits": 5,
+      "expect_blockers": [],
+      "expect_verdict": "合格",
+      "expect_condition_bands": {
+        "reusable": [80, 100], "executable": [80, 100],
+        "verifiable": [50, 100], "clear_io": [80, 100]
+      },
+      "rationale": "五件齐备、四条件都做到。它是标尺：如果连它都拿不到合格，说明评审器太严。"
+    },
+    {
+      "id": "FX02",
+      "fixture": "FX02_缺教学说明",
+      "author": "LiSi",
+      "title": "缺『教学说明』",
+      "expect_completeness_hits": 4,
+      "expect_blockers": [],
+      "expect_verdict": "待改进",
+      "expect_missing_file": "教学说明",
+      "rationale": "五个必须文件少一个。它**不该**被否决——很多同学就是漏交一份文件，不是技能本身不行。"
+    },
+    {
+      "id": "FX03",
+      "fixture": "FX03_写死绝对路径",
+      "author": "WangWu",
+      "title": "写死了个人绝对路径 D:\\Users\\…",
+      "expect_completeness_hits": 5,
+      "expect_blockers": ["绝对路径"],
+      "expect_verdict": "不合格",
+      "expect_condition_bands": {"reusable": [0, 0]},
+      "rationale": "其余五件都齐全、写得很认真——**这正是它作为测试用例的价值**：一份『看起来很好』的提交，只有确定性检查才能发现别人根本跑不起来。"
+    },
+    {
+      "id": "FX04",
+      "fixture": "FX04_私有依赖",
+      "author": "ZhaoLiu",
+      "title": "依赖内网服务与个人密钥",
+      "expect_completeness_hits": 5,
+      "expect_blockers": ["私有资源"],
+      "expect_verdict": "不合格",
+      "expect_condition_bands": {"reusable": [0, 0]},
+      "rationale": "和 FX03 同类但更隐蔽——它不是路径问题，是『需要我的密钥』。同样必须确定性检出。"
+    },
+    {
+      "id": "FX05",
+      "fixture": "FX05_只有文档",
+      "author": "SunQi",
+      "title": "只有文档，没有任何可执行产物",
+      "expect_completeness_hits": 4,
+      "expect_blockers": ["可执行"],
+      "expect_verdict": "不合格",
+      "expect_condition_bands": {"executable": [0, 60]},
+      "rationale": "C4 四条件里的『可执行』是硬要求。只有说明文档、没有能跑的东西，不构成技能。"
+    },
+    {
+      "id": "FX06",
+      "fixture": "FX06_包结构错",
+      "author": "ZhouBa",
+      "title": ".skill 包结构错（SKILL.md 埋在子目录）",
+      "expect_completeness_hits": 5,
+      "expect_blockers": [],
+      "expect_verdict": "合格",
+      "expect_condition_bands": {"executable": [50, 95]},
+      "rationale": "包能解、但 SKILL.md 在子目录里，装不上。**故意不设成否决项**——它可能在某些宿主里仍能工作，判死刑太重；但可执行分必须被扣下来。这条用来验证『扣分』与『否决』的边界是否清晰。"
+    },
+    {
+      "id": "FX07",
+      "fixture": "FX07_IO不明确",
+      "author": "WuJiu",
+      "title": "IO 不明确（没有『输入…输出…』）",
+      "expect_completeness_hits": 5,
+      "expect_blockers": [],
+      "expect_verdict": "合格",
+      "expect_condition_bands": {"clear_io": [0, 70], "reusable": [60, 100]},
+      "rationale": "『它会把问题都找出来，非常好用』——说了很多，但输入是什么、输出是什么一个字没讲。验证 IO 这一条能不能把它压下去。"
+    },
+    {
+      "id": "FX08",
+      "fixture": "FX08_日志是流水账",
+      "author": "ZhengShi",
+      "title": "AI 日志是流水账",
+      "expect_completeness_hits": 5,
+      "expect_blockers": [],
+      "expect_verdict": "合格",
+      "expect_dim_bands": {"aiUsage": [0, 70]},
+      "rationale": "『今天让 AI 帮我写了代码，AI 很厉害』——文件在、但内容零信息量。验证 aiUsage 能不能反映出这一点。注意：**这一条的真实判定应该由 LLM 层做**，规则层只给下限。"
+    }
+  ],
+  "expected_limitations": [
+    "FX06 的『包结构错』在规则层只能扣分、无法判断它到底装不装得上——语义/环境相关，标为已知边界。",
+    "FX07 与 FX08 的最终判定**本质上靠语义**。规则层只能给下限；如果规则层给出了高分，说明规则层的上限压得不够——这两条就是用来盯这件事的。"
+  ]
+}

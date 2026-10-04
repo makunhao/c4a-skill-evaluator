@@ -1,0 +1,15 @@
+{
+  "recorded_at": "2026-10-04",
+  "note": "记录当前可靠性水平。CI 只对『比基线更差』报红。",
+  "summary": {
+    "cases": 8,
+    "evaluated": 8,
+    "blocker_false_positive": 0,
+    "blocker_false_negative": 0,
+    "checks": 20,
+    "band_cells": 11,
+    "consistency": 100.0,
+    "band_hit_rate": 100.0,
+    "total_issues": 0
+  }
+}

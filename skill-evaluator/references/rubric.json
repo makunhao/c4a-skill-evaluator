@@ -1,0 +1,509 @@
+{
+  "schema_version": "1.0",
+  "name": "skill-evaluator",
+  "purpose": "对一份或多份 C4 技能提交做自动初评：L1 采集 → L2 完整性 → L3 四条件质量 → 报告。",
+  "design_principle": {
+    "one_liner": "规则层只判『确定性才能判准的』，LLM 层只判『必须理解才能判的』——两层不重叠。",
+    "why_split_this_way": [
+      "规则层做：文件结构、命名规范、包完整性、写死的绝对路径、私有资源依赖、计数。",
+      "  这些事 LLM 也能做，但会不稳定（同一个输入两次可能不同），而且慢、贵。",
+      "  而『可复用』这一条的核心风险恰恰是绝对路径和私有依赖——这类检查必须是确定性的，否则误判会直接冤枉人。",
+      "LLM 层做：『IO 说得清不清楚』『教学文档是不是真能教会人』『复盘是不是真反思』。",
+      "  这些需要理解语义，规则做不到；写正则去猜只会得到一堆假报。",
+      "两层边界写在这里，是为了让评审结果可以被质疑：哪一条是规则判的、哪一条是模型判的，一望可知。"
+    ],
+    "why_align_to_c4_rubric": [
+      "评审器的输出分**刻意对齐 C4 的真实 rubric 五个维度**，而不是自造一套分数。",
+      "理由：C4A 的目的就是『自动给出初步评审，替代老师一个个看』。",
+      "如果它自己造一套分，谁也说不清它评得准不准；",
+      "对齐之后，就能拿它的预测分与真实 C4 得分做对照——**评审器本身也就可验证了**。"
+    ]
+  },
+  "naming": {
+    "challenge_marker": "_C4_",
+    "spec": "姓名拼音_C4_内容描述.扩展名",
+    "author_extract": "^([A-Za-z\\u4e00-\\u9fa5]{1,20})[_-]C4A?[_-]",
+    "fallback_author": [
+      "文件名前缀",
+      "文件夹名",
+      "文档开头署名",
+      "README 首个标题"
+    ]
+  },
+  "required_files": [
+    {
+      "id": "skill说明",
+      "label": "Skill 说明文档",
+      "hint": "解决什么问题、使用场景、输入输出、使用步骤、真实案例",
+      "filename_patterns": [
+        "skill说明",
+        "skill_doc",
+        "skill-doc",
+        "skill说明文档",
+        "说明"
+      ],
+      "content_signals": [
+        "解决什么问题",
+        "使用场景",
+        "输入",
+        "输出",
+        "使用步骤"
+      ],
+      "content_min_hits": 3,
+      "ext": [
+        ".md",
+        ".docx",
+        ".pdf",
+        ".txt"
+      ]
+    },
+    {
+      "id": "可执行内容",
+      "label": "可执行内容（.skill / 代码 / prompt / workflow）",
+      "hint": "不是理论，是能跑的东西",
+      "filename_patterns": [
+        "skill"
+      ],
+      "content_signals": [],
+      "ext": [
+        ".skill",
+        ".py",
+        ".js",
+        ".sh",
+        ".ts"
+      ],
+      "content_kind": "executable"
+    },
+    {
+      "id": "demo",
+      "label": "Demo（视频 / 截图 / live demo）",
+      "hint": "证明这东西真的跑起来过",
+      "filename_patterns": [
+        "demo",
+        "演示",
+        "截图",
+        "screenshot"
+      ],
+      "content_signals": [],
+      "content_min_hits": 0,
+      "ext": [
+        ".mp4",
+        ".mov",
+        ".gif",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".webp"
+      ]
+    },
+    {
+      "id": "教学说明",
+      "label": "教学说明（怎么上手、常见坑、优化技巧）",
+      "hint": "关键是**教别人用**，不是再讲一遍它是什么",
+      "filename_patterns": [
+        "教学",
+        "tutorial",
+        "teaching",
+        "上手"
+      ],
+      "content_signals": [
+        "上手",
+        "常见坑",
+        "步骤",
+        "怎么用",
+        "注意事项",
+        "优化"
+      ],
+      "content_min_hits": 2,
+      "ext": [
+        ".md",
+        ".docx",
+        ".pdf",
+        ".txt"
+      ]
+    },
+    {
+      "id": "AI日志",
+      "label": "AI 日志（用了什么 AI、怎么指挥、迭代几轮）",
+      "hint": "体现 AI-First 原则；流水账不算",
+      "filename_patterns": [
+        "AI日志",
+        "AI_log",
+        "ai日志",
+        "ailog",
+        "AI_Log"
+      ],
+      "content_signals": [
+        "prompt",
+        "迭代",
+        "AI 工具",
+        "AI工具",
+        "轮",
+        "失败",
+        "改进"
+      ],
+      "content_min_hits": 2,
+      "ext": [
+        ".md",
+        ".docx",
+        ".pdf",
+        ".txt"
+      ]
+    }
+  ],
+  "conditions": [
+    {
+      "id": "reusable",
+      "label": "可复用（Reusable）",
+      "question": "别人拿过去能直接用吗？会不会依赖你的特定环境？",
+      "rules": [
+        {
+          "id": "有安装或使用步骤",
+          "weight": 20,
+          "kind": "positive",
+          "patterns": [
+            "安装",
+            "使用步骤",
+            "怎么用",
+            "快速开始",
+            "上手",
+            "用法",
+            "运行",
+            "命令行",
+            "Usage",
+            "Getting Started"
+          ],
+          "note": "没有步骤 = 别人拿到手不知道从哪开始"
+        },
+        {
+          "id": "声明了环境与依赖",
+          "weight": 20,
+          "kind": "positive",
+          "patterns": [
+            "Python \\d",
+            "node \\d?",
+            "Node\\.js",
+            "版本",
+            "依赖",
+            "requirements",
+            "pip install",
+            "npm install",
+            "需要先装",
+            "前置",
+            "环境要求"
+          ],
+          "note": "哪怕只写一句『Python ≥ 3.9，零依赖』也算——关键是让读者知道要准备什么"
+        },
+        {
+          "id": "泛化说明（说明它不绑定你的场景）",
+          "weight": 15,
+          "kind": "positive",
+          "patterns": [
+            "不依赖",
+            "可迁移",
+            "换成你",
+            "适用于",
+            "也可以用于",
+            "泛化",
+            "换源",
+            "可复用"
+          ],
+          "note": "说明作者想过『别人会不会用不了』"
+        },
+        {
+          "id": "⚠️ 写死了个人绝对路径",
+          "weight": 25,
+          "kind": "blocker",
+          "patterns": [
+            "(?<![A-Za-z])[A-Za-z]:[\\\\/]+Users",
+            "(?<![A-Za-z])[A-Za-z]:[\\\\/]+[A-Za-z]",
+            "/Users/[A-Za-z]",
+            "/home/[a-z]"
+          ],
+          "note": "别人机器上没有这个路径。这是『不可复用』最常见的具体形态，必须确定性检出——所以这一条绝对不能交给模型去猜。⚠️ 正则用 (?<![A-Za-z]) 前置否定，否则 https:// 里的 's:/' 会被误判成绝对路径。"
+        },
+        {
+          "id": "⚠️ 依赖私有资源",
+          "weight": 25,
+          "kind": "blocker",
+          "patterns": [
+            "10\\.\\d+\\.\\d+\\.\\d+",
+            "192\\.168\\.",
+            "\\.internal",
+            "内网",
+            "我的 token",
+            "个人密钥",
+            "仅本人",
+            "私密链接",
+            "需要我的"
+          ],
+          "note": "内网地址与个人凭据让别人根本跑不起来"
+        }
+      ]
+    },
+    {
+      "id": "executable",
+      "label": "可执行（Executable）",
+      "question": "是不是理论？能不能真跑起来？",
+      "rules": [
+        {
+          "id": "有可执行产物",
+          "weight": 35,
+          "kind": "positive",
+          "patterns": [],
+          "detector": "has_executable",
+          "note": "有 .skill / .py / .sh，或 SKILL.md 含 YAML frontmatter，或含围栏代码块"
+        },
+        {
+          "id": ".skill 包结构完整",
+          "weight": 25,
+          "kind": "positive",
+          "patterns": [],
+          "detector": "skill_package_valid",
+          "note": "如果是 .skill：必须是可解包容器，且顶层含 SKILL.md。SKILL.md 埋在子目录里 = 装不上"
+        },
+        {
+          "id": "有可复制的 prompt / 命令",
+          "weight": 20,
+          "kind": "positive",
+          "patterns": [
+            "```",
+            "prompt",
+            "复制",
+            "直接粘贴",
+            "npm ",
+            "pip ",
+            "python ",
+            "git "
+          ],
+          "note": "『我会用 AI 做 X』和『把这段 prompt 贴进去』是两件事"
+        },
+        {
+          "id": "代码有基本的错误处理迹象",
+          "weight": 20,
+          "kind": "positive",
+          "patterns": [
+            "try:",
+            "except",
+            "if not",
+            "raise",
+            "错误处理",
+            "边界",
+            "参数校验"
+          ],
+          "note": "只用得上一点点权重——不是每个技能都需要它，但有的话说明作者跑过真实场景"
+        }
+      ]
+    },
+    {
+      "id": "verifiable",
+      "label": "可验证（Verifiable）",
+      "question": "给定输入 X，能不能得到预期输出 Y？怎么判断它成功了？",
+      "rules": [
+        {
+          "id": "给了具体示例（输入 → 输出）",
+          "weight": 30,
+          "kind": "positive",
+          "patterns": [
+            "示例",
+            "例如",
+            "举例",
+            "输入[:：]",
+            "输出[:：]",
+            "→",
+            "结果[:：]"
+          ],
+          "note": "示例是『可验证』最直接的证据"
+        },
+        {
+          "id": "有测试 / 自检",
+          "weight": 25,
+          "kind": "positive",
+          "patterns": [
+            "测试",
+            "test",
+            "断言",
+            "assert",
+            "回归",
+            "自检",
+            "check",
+            "验证脚本"
+          ],
+          "note": "有测试说明作者想过『怎么知道我改坏了没有』"
+        },
+        {
+          "id": "有可量化的指标或对照",
+          "weight": 25,
+          "kind": "positive",
+          "patterns": [
+            "\\d+/\\d+",
+            "\\d+\\s*%",
+            "\\d+\\s*→\\s*\\d+",
+            "对比",
+            "前后",
+            "误报",
+            "漏报",
+            "准确率",
+            "覆盖率"
+          ],
+          "note": "『很准』不是指标，『误报 0%』才是"
+        },
+        {
+          "id": "有 demo 产物",
+          "weight": 20,
+          "kind": "positive",
+          "patterns": [],
+          "detector": "has_demo",
+          "note": "截图/视频/可打开的链接——让别人自己看一眼，不用信你转述"
+        }
+      ]
+    },
+    {
+      "id": "clear_io",
+      "label": "IO 明确（Clear I/O）",
+      "question": "输入什么、输出什么，能不能一句话说清？",
+      "rules": [
+        {
+          "id": "存在『输入____，输出____』式的一句话说明",
+          "weight": 40,
+          "kind": "positive",
+          "patterns": [
+            "输入[^。\\n]{0,40}输出",
+            "输入[:：][^\\n]{0,60}输出[:：]",
+            "given[^.]{0,40}returns"
+          ],
+          "note": "这是本条件最强的一个信号：一句话里同时出现输入与输出。它极容易机检，也极难伪造——因为说清了就是说清了。"
+        },
+        {
+          "id": "写清了输入的类型与来源",
+          "weight": 30,
+          "kind": "positive",
+          "patterns": [
+            "输入[:：]",
+            "传入",
+            "参数",
+            "读取",
+            "上传",
+            "粘贴",
+            "文件路径",
+            "命令行参数",
+            "input"
+          ],
+          "note": "『输入一段文字』和『输入』是两回事"
+        },
+        {
+          "id": "写清了输出的形态",
+          "weight": 30,
+          "kind": "positive",
+          "patterns": [
+            "输出[:：]",
+            "返回",
+            "生成",
+            "报告",
+            "Markdown",
+            "JSON",
+            "表格",
+            "会得到",
+            "output"
+          ],
+          "note": "输出是一段文字、一个文件、还是一张表？"
+        }
+      ]
+    }
+  ],
+  "semantic_checks": {
+    "note": "以下检查**规则层刻意不做**——它们需要理解语义，写正则只会得到假报。交给可选的 LLM 层。",
+    "checks": [
+      {
+        "id": "io_actually_clear",
+        "question": "那句『输入 X 输出 Y』是真的说清了，还是只是把词堆在一起？",
+        "why_not_rules": "规则只能看到『输入』和『输出』两个词同时出现；看不出 X 是不是个含糊的词（比如『输入数据』）。"
+      },
+      {
+        "id": "teaching_actually_teaches",
+        "question": "教学文档是在教人上手，还是把 skill 说明又抄了一遍？",
+        "why_not_rules": "两者都会出现『步骤』『使用』这些词，词频完全无法区分。"
+      },
+      {
+        "id": "ai_log_is_not_laundry",
+        "question": "AI 日志是真记录了指挥过程与失败，还是『今天让 AI 写了代码』的流水账？",
+        "why_not_rules": "流水账里也有『AI』『写代码』这些词。判定它需要看有没有『决策』与『纠偏』。"
+      },
+      {
+        "id": "reflection_is_real",
+        "question": "复盘是套话，还是真写了失败与改进方案？",
+        "why_not_rules": "套话里也会出现『反思』『改进』。要看有没有具体的失败事件和可执行的下一次动作。"
+      },
+      {
+        "id": "executable_actually_runs",
+        "question": "那段代码真的能跑吗？还是只贴了个片段？",
+        "why_not_rules": "规则可以判断『有没有代码块』，判断不了『这段代码能不能跑』。本轮不执行外部代码（安全边界），因此这一项**只降级提示、不打分**。"
+      }
+    ]
+  },
+  "c4_dimensions": [
+    {
+      "id": "skillQuality",
+      "label": "技能质量",
+      "max_points": 25,
+      "source": "conditions",
+      "source_ids": [
+        "reusable",
+        "executable",
+        "verifiable",
+        "clear_io"
+      ],
+      "note": "C4 rubric 原文：『技能质量 25』。这里把四条件等权合成——因为 C4 的 CHALLENGE.md 把四条件列为『必须同时满足』，没有给出它们之间的权重。"
+    },
+    {
+      "id": "teachability",
+      "label": "可教性",
+      "max_points": 20,
+      "source": "required_files",
+      "source_id": "教学说明",
+      "note": "以『教学说明』这份文件的存在性 + 内容信号为主；语义质量由 LLM 层补充。"
+    },
+    {
+      "id": "artifactCompleteness",
+      "label": "产物完整性",
+      "max_points": 15,
+      "source": "required_files",
+      "note": "五个必须文件的齐全度，按命中数线性给分。"
+    },
+    {
+      "id": "aiUsage",
+      "label": "AI 使用质量",
+      "max_points": 20,
+      "source": "required_files",
+      "source_id": "AI日志",
+      "note": "以 AI 日志的存在性 + 内容信号为主。"
+    },
+    {
+      "id": "reflectionQuality",
+      "label": "复盘质量",
+      "max_points": 20,
+      "source": "content_scan",
+      "note": "在全部文本里扫『失败/踩坑/改进/下一次』这类信号。规则层只能给出微弱信号，主要靠 LLM 层。**规则层给这一项的上限刻意压到 60%**，避免把一个靠语义判断的维度用关键词判成高分。"
+    }
+  ],
+  "hard_gates": {
+    "note": "不满足则整体判『不合格』，无论其余部分多好。",
+    "items": [
+      {
+        "id": "has_executable",
+        "label": "没有任何可执行产物",
+        "why": "C4 四条件里的『可执行』是硬要求——只有文档没有能跑的东西，不构成技能"
+      },
+      {
+        "id": "empty_submission",
+        "label": "提交为空（或只有文件夹，没有文件）",
+        "why": "无从评审"
+      },
+      {
+        "id": "absolute_path_blocker",
+        "label": "写死了个人绝对路径 / 依赖私有资源",
+        "why": "这两条直接击穿『可复用』；而 C4 把『可复用』列为四条件第一条"
+      }
+    ]
+  }
+}
